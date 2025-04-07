@@ -1,5 +1,5 @@
 // File: App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import SearchBar from './components/SearchBar';
 import SearchResults from './components/SearchResults';
@@ -8,18 +8,44 @@ import Spotify from './utils/Spotify';
 
 function App() {
   const [searchResults, setSearchResults] = useState([]);
-  const [playlistName, setPlaylistName] = useState('New Playlist');
-  const [playlistTracks, setPlaylistTracks] = useState([]);
+  const [playlistName, setPlaylistName] = useState(() => localStorage.getItem('playlistName') || 'New Playlist');
+  const [playlistTracks, setPlaylistTracks] = useState(() => {
+    const saved = localStorage.getItem('playlistTracks');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [userPlaylists, setUserPlaylists] = useState([]);
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState(() => {
+    return localStorage.getItem('selectedPlaylistId') || null;
+  });
   const [searchType, setSearchType] = useState('track');
   const [currentUser, setCurrentUser] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const search = useCallback((term) => {
+    if (!term) return;
+    localStorage.setItem('lastSearch', term);
+    Spotify.search(term, searchType).then(results => {
+      const enriched = results.map(track => ({ ...track, preview_url: track.preview_url }));
+      setSearchResults(enriched.filter(track =>
+        !playlistTracks.some(p => p.id === track.id)
+      ));
+    });
+  }, [playlistTracks, searchType]);
 
   useEffect(() => {
-    Spotify.getAccessToken();
+    Spotify.getAccessToken(true);
     Spotify.getCurrentUser().then(setCurrentUser);
     Spotify.getUserPlaylists().then(setUserPlaylists);
-  }, []);
+
+    const lastSearch = localStorage.getItem('lastSearch');
+    if (lastSearch) search(lastSearch);
+  }, [search]);
+
+  useEffect(() => {
+    localStorage.setItem('playlistName', playlistName);
+    localStorage.setItem('playlistTracks', JSON.stringify(playlistTracks));
+    localStorage.setItem('selectedPlaylistId', selectedPlaylistId || '');
+  }, [playlistName, playlistTracks, selectedPlaylistId]);
 
   const addTrack = (track) => {
     if (playlistTracks.find(savedTrack => savedTrack.id === track.id)) return;
@@ -36,25 +62,23 @@ function App() {
 
   const savePlaylist = () => {
     const trackURIs = playlistTracks.map(track => track.uri);
+    setIsSaving(true);
     if (selectedPlaylistId) {
       Promise.all([
         Spotify.updatePlaylistTracks(selectedPlaylistId, trackURIs),
         Spotify.renamePlaylist(selectedPlaylistId, playlistName)
       ]).then(() => {
         Spotify.getUserPlaylists().then(setUserPlaylists);
+        setIsSaving(false);
       });
     } else {
       Spotify.savePlaylist(playlistName, trackURIs).then(() => {
         setPlaylistName('New Playlist');
         setPlaylistTracks([]);
         Spotify.getUserPlaylists().then(setUserPlaylists);
+        setIsSaving(false);
       });
     }
-  };
-
-  const search = (term) => {
-    if (!term) return;
-    Spotify.search(term, searchType).then(setSearchResults);
   };
 
   const loadPlaylist = (playlist) => {
@@ -92,6 +116,13 @@ function App() {
         </select>
       </div>
       <SearchBar onSearch={search} />
+      {isSaving && (
+        <div className="popup">
+          <div className="popup-content">
+            <p>Saving playlist...</p>
+          </div>
+        </div>
+      )}
       <div className="App-playlist">
         <div>
           <h2>Your Playlists</h2>
