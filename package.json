@@ -15,7 +15,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "prebuild": "cp public/_redirects public/redirects",  
+    "build": "react-scripts build && cp public/redirects build/_redirects",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
